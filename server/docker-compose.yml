@@ -1,0 +1,12 @@
+services:
+  teamdankook:
+    build: .
+    container_name: teamdankook
+    ports:
+      - "8003:8003"
+    env_file: .env
+    environment:
+      - TZ=Asia/Seoul
+    volumes:
+      - ./data:/app/data
+    restart: always
