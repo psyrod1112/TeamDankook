@@ -1,6 +1,7 @@
 services:
   teamdankook:
     build: .
+    user: "1000:1000"
     container_name: teamdankook
     ports:
       - "8003:8003"

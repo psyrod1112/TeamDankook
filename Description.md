@@ -10,7 +10,7 @@ Oct 11, 2026 · @ParkSangyoon
 
 | 기능 | 학생 | 교수 | 비고 |
 | --- | --- | --- | --- |
-| mock 로그인 | 학번 로그인, 수강 과목·팀 배정 수신 | 교번 로그인, 담당 과목 수신 | 진짜 포털 연동 없음 |
+| mock 로그인 | 학번 로그인, 수강 과목·팀 배정 수신 | 교번 로그인, 담당 과목 수신 | mock 단국 포털 서버에서 받아옴 |
 | 과목 목록 | 팀플 있는 과목만 활성화 | 담당 과목의 팀 목록 |  |
 | 팀 스페이스 | 우리 팀원만 입장 | 담당 과목 팀 조회 | 남의 팀 접근 차단 |
 | 실시간 채팅 | 팀원끼리 대화 | 볼 수 없음 | 원문은 교수에게도 비공개 |
@@ -24,7 +24,7 @@ Oct 11, 2026 · @ParkSangyoon
 
 | 제외 항목 | 이유 |
 | --- | --- |
-| 진짜 단국대 포털 연동 | 학생 비밀번호를 대신 다루면 보안·개인정보 문제, 학교 공식 허가 필요 |
+| 진짜 단국대 포털 연동 | 학생 비밀번호를 대신 다루면 보안·개인정보 문제, 학교 공식 허가 필요. 대신 **mock 단국 포털 서버**를 따로 두고 API로 연동한다 (아래 "mock 단국 포털 연동") |
 | 메시지마다 실시간 AI 분석 | 비용 폭발. 하루 1번 모아서 분석 |
 | 푸시 알림, 음성·영상 통화 | MVP 핵심이 아님 |
 | 앱스토어 출시 | 웹과 안드로이드 실행까지만 |
@@ -53,6 +53,7 @@ Oct 11, 2026 · @ParkSangyoon
 | 앱 상태 관리 | Riverpod | 업계 표준, 테스트하기 쉬움 |
 | HTTP / 실시간 | `dio` / `web_socket_channel` |  |
 | 서버 | FastAPI + JWT | portfolio 경험 재사용 |
+| 학교 데이터 | mock 단국 포털(FastAPI + sqlite, 별도 컨테이너) + 서버 간 호출은 `httpx` | 실제 포털 대신 원본 역할. 진짜 연동 시 이 자리만 교체 |
 | DB | PostgreSQL + SQLAlchemy 2.0 + Alembic | 핵심 스택, 마이그레이션 도구 학습 |
 | 실시간 채팅 | FastAPI WebSocket, 메모리에서 연결 관리 | 서버 1대 MVP에 충분 |
 | 파일 | Cloudflare R2, presigned URL로 앱이 직접 업로드 | 서버 부담 없음, 다운로드 비용 0 |
@@ -65,7 +66,23 @@ Oct 11, 2026 · @ParkSangyoon
 
 &#91;embedded content: 팀단국 아키텍처 · 서버 1대, 외부 서비스 3개\]
 
-앱은 서버(REST, WebSocket)와 R2(파일 직접 업로드)만 만나고, Claude API는 서버의 하루 1번 분석 작업만 호출한다.
+앱은 서버(REST, WebSocket)와 R2(파일 직접 업로드)만 만나고, Claude API는 서버의 하루 1번 분석 작업만 호출한다. 학교 데이터는 서버만 mock 단국 포털에 물어본다 (앱은 포털을 직접 만나지 않는다).
+
+### mock 단국 포털 연동
+
+수강 과목, 팀플 여부, 팀 배정의 **원본은 학교(포털)** 이고, 팀단국은 그걸 받아다 쓴다. 실제 단국대 DB는 쓸 수 없으므로 mock 포털 서버가 그 역할을 흉내 낸다.
+
+```
+앱 ──로그인──▶ 팀단국 서버 :8003 ──API 키──▶ mock 단국 포털 :8004
+                    │  ◀── 학생 정보·수강 과목·팀 배정 (JSON)
+                    └─ 내 DB에 upsert (사본) → JWT 발급
+```
+
+1. **로그인할 때 동기화**: 매번 포털에 묻지 않고, 로그인 시 받아서 팀단국 DB에 사본으로 저장한다. 포털이 잠시 죽어도 받아 둔 데이터로 동작하고, 채팅·진행도 등이 내 DB의 팀을 FK로 가리킬 수 있다.
+2. **upsert로 중복 방지**: 포털 쪽 ID(`portal_id`)를 UNIQUE로 저장해 "없으면 넣고, 있으면 갱신"한다. 몇 번 동기화해도 행이 늘지 않는다.
+3. **포털은 닫혀 있다**: 학생 개인정보를 가진 서버이므로 팀단국 서버만 API 키 헤더로 호출할 수 있다. 키가 없거나 틀리면 401.
+4. **비밀번호는 팀단국이 다루지 않는다**: 신원 확인은 포털이 하고, 팀단국은 결과만 받는다. 실제 연동 시 이 자리는 학교 SSO로 바뀐다.
+5. **역할은 포털이 정한다**: 학생/교수 구분은 포털 데이터 기준. 앱 로그인 화면의 학생/교수 선택은 UX일 뿐이다.
 
 ## 데이터 모델 초안
 
@@ -73,11 +90,11 @@ Oct 11, 2026 · @ParkSangyoon
 
 | 테이블 | 핵심 컬럼 | 메모 |
 | --- | --- | --- |
-| User | id, 학번/교번, name, role(student/professor), consent\_at | 동의 시각 기록 |
-| Course | id, code, title, professor\_id, peer\_review\_open | 교수가 평가 기간을 연다 |
-| Enrollment | user\_id, course\_id | 수강 관계 |
-| Team | id, course\_id, name, github\_installation\_id | GitHub App 연결 정보 |
-| TeamMember | team\_id, user\_id | 팀 배정 (mock 데이터로 채움) |
+| User | id, login\_id(학번/교번), name, role(student/professor), department, consent\_at | 포털에서 동기화. consent\_at만 팀단국 데이터 (NULL = 미동의) |
+| Course | id, portal\_id, code, title, professor\_id, schedule, start\_date, peer\_review\_open | 포털에서 동기화. start\_date로 주차 계산. peer\_review\_open만 팀단국 데이터 |
+| Enrollment | user\_id, course\_id | 수강 관계 (포털에서 동기화) |
+| Team | id, portal\_id, course\_id, name, github\_installation\_id | 포털에서 동기화. github\_installation\_id는 6단계에서 추가 |
+| TeamMember | team\_id, user\_id | 팀 배정 (포털에서 동기화) |
 | Message | id, team\_id, sender\_id, content, created\_at | 원문은 팀원만 조회 |
 | Milestone | id, team\_id, user\_id, week, body, links | 주차 진행도 |
 | MilestoneFile | id, milestone\_id, r2\_key, filename | 파일은 R2, DB엔 키만 |
@@ -92,7 +109,9 @@ Oct 11, 2026 · @ParkSangyoon
 
 | 테이블 | 제약 | 막는 상황 |
 | --- | --- | --- |
-| User | UNIQUE(학번/교번) | 같은 학번으로 계정이 두 개 생김 |
+| User | UNIQUE(login\_id), CHECK(role IN ('student','professor')) | 같은 학번으로 계정이 두 개 생김, 이상한 역할 |
+| Course | UNIQUE(portal\_id) | 동기화할 때마다 같은 과목이 또 생김 |
+| Team | UNIQUE(portal\_id), UNIQUE(course\_id, name) | 동기화할 때마다 같은 팀이 또 생김, 한 과목에 "3조"가 둘 |
 | Enrollment | UNIQUE(user\_id, course\_id) | 같은 과목 수강 기록이 두 번 들어감 |
 | TeamMember | UNIQUE(team\_id, user\_id) | 같은 학생이 같은 팀에 두 번 배정됨 |
 | CommitEvent | UNIQUE(team\_id, sha) | GitHub 웹훅 재전송으로 같은 커밋이 두 번 쌓임 |
@@ -104,7 +123,7 @@ Oct 11, 2026 · @ParkSangyoon
 한 줄을 끝까지 관통시킨 뒤 기능을 하나씩 얹는다. 각 단계는 사전지식 + 과제 방식으로 진행한다.
 
 1. **뼈대**: Docker Compose로 FastAPI + PostgreSQL 띄우기, Alembic 첫 마이그레이션
-2. **첫 관통**: mock 로그인 → 과목 목록(팀플 있는 것만 활성) → 팀 스페이스 입장 (서버 + Flutter)
+2. **첫 관통**: mock 단국 포털 서버 → 로그인 시 동기화 → 과목 목록(팀플 있는 것만 활성) → 팀 스페이스 입장 (서버 + Flutter)
 3. **실시간 채팅**: WebSocket, 팀원만 접속, 메시지 저장
 4. **주차 진행도 + R2 업로드**
 5. **교수 화면**: 비공개 메시지, 팀 간 평가 열기/닫기
