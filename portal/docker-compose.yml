@@ -1,0 +1,13 @@
+services:
+  dankook-portal:
+    build: .
+    user: "1000:1000"
+    container_name: dankook-portal
+    ports:
+      - "8004:8004"
+    env_file: .env
+    environment:
+      - TZ=Asia/Seoul
+    volumes:
+      - ./data:/app/data
+    restart: always
