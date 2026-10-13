@@ -7,7 +7,7 @@ import secrets
 
 load_dotenv()
 
-app = FastAPI(title="Mock Dankook Portal", version="1.0.0")
+app = FastAPI(title="Mock Dankook Portal", version="1.0.0", docs_url=None, redoc_url=None)
 
 PORTAL_API_KEY = os.getenv("PORTAL_API_KEY")
 if not PORTAL_API_KEY:
